@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -52,6 +53,13 @@ func (this *MasterServerQuerier) FilterAppIds(appIds []AppId) {
 		this.filters = append(this.filters, fmt.Sprintf("\\appid\\%d", appId))
 	}
 }
+func (this *MasterServerQuerier) FilterName(name string) {
+	this.filters = append(this.filters, fmt.Sprintf("\\name_match\\%s", name))
+}
+
+func (this *MasterServerQuerier) FilterIP(ip string) {
+	this.filters = append(this.filters, fmt.Sprintf("\\gameaddr\\%s", ip))
+}
 
 func (this *MasterServerQuerier) ClearFilters() {
 	this.filters = []string{}
@@ -65,16 +73,8 @@ func computeNextFilterList(filters []string) ([]string, []string) {
 // subsequent requests, we sleep for two seconds in between each batch request.
 // This means the querying process is quite slow.
 func (this *MasterServerQuerier) Query(callback MasterQueryCallback) error {
-	filters, remaining := computeNextFilterList(this.filters)
-	for {
-		if err := this.tryQuery(callback, filters); err != nil {
-			return err
-		}
-
-		if len(remaining) == 0 {
-			break
-		}
-		filters, remaining = computeNextFilterList(remaining)
+	if err := this.tryQuery(callback, this.filters); err != nil {
+		return err
 	}
 	return nil
 }
@@ -93,7 +93,7 @@ func BuildMasterQuery(hostAndPort string, filters []string) []byte {
 	} else if len(filters) == 1 {
 		packet.WriteCString(filters[0])
 	} else {
-		header := fmt.Sprintf("\\or\\%d", len(filters))
+		header := strings.Join(filters, "\\and\\")
 		packet.WriteBytes([]byte(header))
 		for _, filter := range filters {
 			packet.WriteBytes([]byte(filter))

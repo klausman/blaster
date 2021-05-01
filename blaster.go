@@ -24,10 +24,10 @@ import (
 )
 
 var (
-	sOutputLock sync.Mutex
+	sOutputLock   sync.Mutex
 	sOutputBuffer io.Writer
 	sOutputFormat string
-	sNumServers int64
+	sNumServers   int64
 )
 
 type ErrorObject struct {
@@ -36,38 +36,38 @@ type ErrorObject struct {
 }
 
 type ServerObject struct {
-	Address      string             `json:"ip"`
-	LocalAddress string             `json:"local_ip,omitempty"`
-	Protocol     uint8              `json:"protocol"`
-	Name         string             `json:"name"`
-	MapName      string             `json:"map"`
-	Folder       string             `json:"folder"`
-	Game         string             `json:"game"`
-	Players      uint8              `json:"players"`
-	MaxPlayers   uint8              `json:"max_players"`
-	Bots         uint8              `json:"bots"`
-	Type         string             `json:"type"`
-	Os           string             `json:"os"`
-	Visibility   string             `json:"visibility"`
-	Vac          bool               `json:"vac"`
+	Address      string `json:"ip"`
+	LocalAddress string `json:"local_ip,omitempty"`
+	Protocol     uint8  `json:"protocol"`
+	Name         string `json:"name"`
+	MapName      string `json:"map"`
+	Folder       string `json:"folder"`
+	Game         string `json:"game"`
+	Players      uint8  `json:"players"`
+	MaxPlayers   uint8  `json:"max_players"`
+	Bots         uint8  `json:"bots"`
+	Type         string `json:"type"`
+	Os           string `json:"os"`
+	Visibility   string `json:"visibility"`
+	Vac          bool   `json:"vac"`
 
 	// Only available from The Ship.
-	Ship         *valve.TheShipInfo `json:"theship,omitempty"`
+	Ship *valve.TheShipInfo `json:"theship,omitempty"`
 
 	// Only available on Source.
-	AppId        valve.AppId        `json:"appid,omitempty"`
-	GameVersion  string             `json:"game_version,omitempty"`
-	Port         uint16             `json:"port,omitempty"`
-	SteamId      string             `json:"steamid,omitempty"`
-	GameMode     string             `json:"game_mode,omitempty"`
-	GameId       string             `json:"gameid,omitempty"`
-	SpecTvPort   uint16             `json:"spectv_port,omitempty"`
-	SpecTvName   string             `json:"spectv_name,omitempty"`
+	AppId       valve.AppId `json:"appid,omitempty"`
+	GameVersion string      `json:"game_version,omitempty"`
+	Port        uint16      `json:"port,omitempty"`
+	SteamId     string      `json:"steamid,omitempty"`
+	GameMode    string      `json:"game_mode,omitempty"`
+	GameId      string      `json:"gameid,omitempty"`
+	SpecTvPort  uint16      `json:"spectv_port,omitempty"`
+	SpecTvName  string      `json:"spectv_name,omitempty"`
 
 	// Only available on Half-Life 1.
-	Mod          *valve.ModInfo     `json:"mod,omitempty"`
+	Mod *valve.ModInfo `json:"mod,omitempty"`
 
-	Rules        map[string]string  `json:"rules"`
+	Rules map[string]string `json:"rules"`
 }
 
 func addJson(hostAndPort string, obj interface{}) {
@@ -180,11 +180,14 @@ func main() {
 	master, err := valve.NewMasterServerQuerier(*flag_master)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not query master: %s", err.Error())
+		os.Exit(-2)
 	}
 	defer master.Close()
 
 	// Set up the filter list.
 	master.FilterAppIds(appids)
+	master.FilterName("Misfit Company")
+	master.FilterIP("195.201.242.212")
 
 	// Initialize our batch processor, which will receive servers and query them
 	// concurrently.
@@ -196,7 +199,6 @@ func main() {
 			return
 		}
 		defer query.Close()
-
 		info, err := query.QueryInfo()
 		if err != nil {
 			addError(addr.String(), err)
@@ -204,19 +206,19 @@ func main() {
 		}
 
 		out := &ServerObject{
-			Address:      addr.String(),
-			Protocol:     info.Protocol,
-			Name:         info.Name,
-			MapName:      info.MapName,
-			Folder:       info.Folder,
-			Game:         info.Game,
-			Players:      info.Players,
-			MaxPlayers:   info.MaxPlayers,
-			Bots:         info.Bots,
-			Type:         info.Type.String(),
-			Os:           info.OS.String(),
-			Ship:         info.TheShip,
-			Mod:          info.Mod,
+			Address:    addr.String(),
+			Protocol:   info.Protocol,
+			Name:       info.Name,
+			MapName:    info.MapName,
+			Folder:     info.Folder,
+			Game:       info.Game,
+			Players:    info.Players,
+			MaxPlayers: info.MaxPlayers,
+			Bots:       info.Bots,
+			Type:       info.Type.String(),
+			Os:         info.OS.String(),
+			Ship:       info.TheShip,
+			Mod:        info.Mod,
 		}
 		if info.Vac == 1 {
 			out.Vac = true
@@ -255,16 +257,21 @@ func main() {
 			}
 		}
 
-		addJson(addr.String(), out)
+		//	addJson(addr.String(), out)
+		var mod string
+		if strings.Contains(out.Name, "Event") || strings.Contains(out.Name, "(E)") {
+			mod = "event"
+		} else if strings.Contains(out.Name, "SF") {
+			mod = "sf"
+		} else if strings.Contains(out.Name, "Cold War") {
+			mod = "coldwar"
+		} else {
+			mod = "unknown"
+		}
+		//fmt.Fprintf(os.Stderr, "%s %#v\n", mod, info)
+		fmt.Fprintf(os.Stdout, "arma3_ds_game_player_count{server=\"%s\", map=\"%s\", modpack=\"%s\", mission=\"%s\"} %d\n", info.Name, out.MapName, mod, info.Game, info.Players)
 	}, *flag_j)
 	defer bp.Terminate()
-
-	switch sOutputFormat {
-	case "list":
-		sOutputBuffer.Write([]byte("[\n"))
-	case "map":
-		sOutputBuffer.Write([]byte("{\n"))
-	}
 
 	// Query the master.
 	err = master.Query(func(servers valve.ServerList) error {
@@ -279,15 +286,4 @@ func main() {
 	// Wait for batch processing to complete.
 	bp.Finish()
 
-	if sNumServers != 0 {
-		sOutputBuffer.Write([]byte("\n"))
-	}
-
-	switch sOutputFormat {
-	case "list":
-		sOutputBuffer.Write([]byte("]\n"))
-	case "map":
-		sOutputBuffer.Write([]byte("}\n"))
-	}
 }
-
